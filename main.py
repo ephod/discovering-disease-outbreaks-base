@@ -1,14 +1,14 @@
 # Builtin Python modules
-import itertools
-import json
+import csv
 from pathlib import Path
-from pprint import pprint
 import re
 import string
 from typing import Dict, List, Set
+import unicodedata
 
 from geonamescache import GeonamesCache
 from more_itertools import partitions
+import pandas as pd
 
 from helper import Cities, Countries, City, Country
 
@@ -26,17 +26,21 @@ text_file: Path = Path('./data/headlines.txt')
 assert text_file.is_file(), f"Wrong file: {text_file}"
 
 unique_cities: Set[str] = set()
-cities_country_code: Dict[str, List[str]] = {}
-valid_characters: Set[str] = set([str(character) for character in [*string.ascii_letters, *string.digits]])
+map_country_code_to_city: Dict[str, List[str]] = {}
+
+extra_characters = ["-", "’", "/"]
+valid_characters: Set[str] = set(
+    [str(character) for character in [*string.ascii_letters, *string.digits, *extra_characters]])
+
 for city in cities.values():
-    # Country code as dictionary key
+    # Country code as dictionary search_term_length
     country_code = city['countrycode']
-    if country_code not in cities_country_code.keys():
-        cities_country_code[country_code] = []
+    if country_code not in map_country_code_to_city.keys():
+        map_country_code_to_city[country_code] = []
     # Append city name
     city_name = city['name']
-    if city_name not in cities_country_code[country_code]:
-        cities_country_code[country_code].append(city_name)
+    if city_name not in map_country_code_to_city[country_code]:
+        map_country_code_to_city[country_code].append(city_name)
         unique_cities.update([city_name])
         for character in city_name:
             valid_characters.update([character])
@@ -45,34 +49,91 @@ for city in cities.values():
             valid_characters.update([character])
 
 lines: List[str] = []  # 650 lines
+
 all_characters: Set[str] = set()
-with text_file.open() as file_handler:
+
+with text_file.open(encoding="utf8") as file_handler:
     for line in file_handler.readlines():
-        current_line = line.rstrip('\n')
-        lines.append(current_line)
-        for character in current_line:
+        modified_line = line.rstrip('\n')
+        lines.append(modified_line)
+        for character in modified_line:
             all_characters.update([character])
 
 nonvalid_characters: Set[str] = all_characters - valid_characters
+# Create translation table
 nonvalid_translation: str = "".join(list(nonvalid_characters))
-# Python's 3 compatibility
 translation_table = dict.fromkeys(map(ord, nonvalid_translation), None)
 
-for line in lines:
+
+def normalize_text(text: str) -> str:
+    return unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode("utf-8")
+
+
+def get_search_terms(current_line: str) -> Dict[int, Set[str]]:
     # Remove unwanted characters
-    current_line = line.translate(translation_table)
+    modified_line = current_line.translate(translation_table)
     # Remove multiple spaces
-    current_line = re.sub(r"\s\s+", " ", current_line)
-    words = current_line.split(" ")
-    word_count = len(words)
-    print(f"Line: {line}")
-    unique_search_terms: Dict[int, Set[str]] = {}
+    modified_line = re.sub(r"\s\s+", " ", modified_line)
+    words = [word.rstrip(",") for word in modified_line.split(" ")]
+
+    results: Dict[int, Set[str]] = {}
     for partition in partitions(words):
         for subpartition in partition:
             subpartition_word_count: int = len(subpartition)
-            if subpartition_word_count not in unique_search_terms.keys():
-                unique_search_terms[subpartition_word_count] = set()
-            search_term = " ".join(subpartition)
-            unique_search_terms[subpartition_word_count].update([search_term])
-    pprint(unique_search_terms)
-    break
+            if subpartition_word_count not in results.keys():
+                results[subpartition_word_count] = set()
+            result = " ".join(subpartition)
+            results[subpartition_word_count].update([result])
+    return results
+
+
+# Data-frame data
+df_data: List[List[str]] = []
+
+for line in lines:
+    search_terms: Dict[int, Set[str]] = get_search_terms(line)
+
+    # Create a dictionary with cities as keys and country codes as values
+    found_cities: Dict[str, str] = {}
+    found_countries: Set[str] = set()
+
+    for search_term_length, search_term in search_terms.items():
+        if search_term_length in sorted(group_cities_by_word_count.keys()):
+            # Create a dictionary with normalized cities as keys and country codes as values
+            cities_and_countries: Dict[str, str] = {normalize_text(current[:-3]): current[-2:] for current in
+                                                    group_cities_by_word_count[search_term_length]}
+            # Create a set of normalized cities from previous dictionary
+            subgroup_cities_by_word_count: Set[str] = set(
+                [normalize_text(city_key) for city_key in cities_and_countries.keys()])
+            # Compare original search term with normalized cities
+            intersections: Set[str] = search_term.intersection(subgroup_cities_by_word_count)
+            if len(intersections) > 0:
+                longest_word = max(list(intersections), key=len)
+                country_iso = cities_and_countries[longest_word]
+                # Compare original search term with non normalized cities
+                original_city = [current[:-3] for current in group_cities_by_word_count[search_term_length] if
+                                 normalize_text(current[:-3]) == longest_word][0]
+                found_cities[original_city] = countries[country_iso]['name']
+        if search_term_length in group_countries_by_word_count.keys():
+            subgroup_countries_by_word_count: Set[str] = set(group_countries_by_word_count[search_term_length])
+            intersections: Set[str] = search_term.intersection(subgroup_countries_by_word_count)
+            if len(intersections) > 0:
+                found_countries.update(intersections)
+
+    # Remove duplicate countries
+    longest_word = ""
+    if len(found_cities) > 0:
+        longest_word = max(found_cities.keys(), key=len)
+    if longest_word in found_cities:
+        found_countries.clear()
+        # Add country
+        found_countries.add(found_cities[longest_word])
+
+    df_data.append([line, ", ".join(list(found_countries)), longest_word])
+
+# Create Panda's dataframe
+column_names = ['headline', 'countries', 'cities']
+live_project_df = pd.DataFrame(df_data, columns=column_names)
+
+# Export to CSV
+live_project_df.to_csv("./data/clean.csv", index=False, quoting=csv.QUOTE_ALL)
