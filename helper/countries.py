@@ -37,4 +37,4 @@ class Countries(Place):
             # All int keys will be coerced to string keys
             # @url https://bugs.python.org/issue32816
             data = json.load(file_handler)
-        return {int(key): value for key, value in self.load_json().items()}
+        return {int(key): value for key, value in data.items()}

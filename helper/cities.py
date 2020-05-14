@@ -34,10 +34,10 @@ class Cities(Place):
     def get_cities(self) -> Dict[str, City]:
         return self.geonames_cache.get_cities()
 
-    def load_json(self) -> Dict:
+    def load_json(self) -> Dict[int, List[str]]:
         data: Dict = {}
         with self.json_file_path.open(encoding='utf8') as file_handler:
             # All int keys will be coerced to string keys
             # @url https://bugs.python.org/issue32816
             data = json.load(file_handler)
-        return {int(key): value for key, value in self.load_json().items()}
+        return {int(key): value for key, value in data.items()}
