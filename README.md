@@ -24,7 +24,7 @@ name: discovering-disease-outbreaks
 conda env update -f environment.yml
 ```
 
-If you want 
+If you want to update another environment based on the env file.
 
 ```bash
 conda env update --name myenv -f environment.yml
