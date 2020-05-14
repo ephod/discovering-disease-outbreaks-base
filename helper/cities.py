@@ -18,10 +18,11 @@ class Cities(Place):
         cities_ordered_by_word_count: Dict[int, Set[str]] = {}
         for city in self.get_cities().values():
             city_name: str = city['name']
+            country_code: str = city['countrycode']
             word_count: int = len(city_name.split(" "))
             if word_count not in cities_ordered_by_word_count.keys():
                 cities_ordered_by_word_count[word_count] = set()
-            cities_ordered_by_word_count[word_count].update([city_name])
+            cities_ordered_by_word_count[word_count].update([f"{city_name} {country_code}"])
 
         # Set is not JSON serializable
         json_data: Dict[int, List[str]] = {key: list(value) for key, value in cities_ordered_by_word_count.items()}
